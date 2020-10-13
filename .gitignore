@@ -1,0 +1,11 @@
+*.xml
+*.*.xml
+*.mk
+*.d
+*.elf
+*.bin
+*.map
+*.d
+*.list
+*.o
+makefile
