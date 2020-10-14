@@ -59,15 +59,12 @@ static const char *DISP_NextString;
 static char DISP_CurString[10];
 static int DISP_Loop = 0;
 static I2C_HandleTypeDef hi2c1;
+VIRT_UART_HandleTypeDef huart0;
+VIRT_UART_HandleTypeDef huart1;
 static __IO FlagStatus VirtUart0RxMsg = RESET;
 static __IO FlagStatus VirtUart1RxMsg = RESET;
 static char VirtUart0ChannelBuffRx[MAX_BUFFER_SIZE];
-//static char VirtUart1ChannelBuffRx[MAX_BUFFER_SIZE];
 static uint16_t VirtUart0ChannelRxSize = 0;
-//static uint16_t VirtUart1ChannelRxSize = 0;
-
-VIRT_UART_HandleTypeDef huart0;
-VIRT_UART_HandleTypeDef huart1;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -301,7 +298,7 @@ typedef enum MasterCmd {
     GET_LUX_CMD,
     UNKNOWN_CMD
 } MasterCmd_t;
-char* MasterCmdString[] = {"run_fwd;""\0", "run_bwd;""\0", "stop;""\0", "get_status;""\0", "discard;""\0", "get_lux;""\0"};
+char* MasterCmdString[] = {"run_fwd;", "run_bwd;", "stop;", "get_status;", "discard;", "get_lux;"};
 int nCmds = NELEMS(MasterCmdString);
 
 MasterCmd_t ParseMasterCmd(char * cmd) {
@@ -328,7 +325,7 @@ typedef enum SlaveAnsw {
     MEASURED_LUX_MSG,
     UNKNOWN_MSG
 } SlaveAnsw_t;
-char* SlaveAnswString[] = {"ready;""\0", "running_forward;""\0", "running_backward;""\0", "man_stopped;""\0", "sens_stopped;""\0", "emergency_stop;""\0", "refused;""\0", "discarded;""\0", "failed;""\0", "measured_lux_xxxx;""\0", "unknown;""\0"};
+char* SlaveAnswString[] = {"ready;", "running_forward;", "running_backward;", "man_stopped;", "sens_stopped;", "emergency_stop;", "refused;", "discarded;", "failed;", "measured_lux_xxxx;", "unknown;"};
 
 void SendSlaveAnswer(int nargs, ...) {
   assert(nargs >= 1);
@@ -337,7 +334,6 @@ void SendSlaveAnswer(int nargs, ...) {
   SlaveAnsw_t answ = (SlaveAnsw_t)va_arg(vl, int);
 
   switch (answ) {
-  case READY_MSG:
   case RUNNING_FWD_MSG:
   case RUNNING_BWD_MSG:
   case MAN_STOPPED_MSG:
@@ -345,7 +341,9 @@ void SendSlaveAnswer(int nargs, ...) {
   case DISCARDED_PIECE_MSG:
   case FAILED_MSG:
   case UNKNOWN_MSG:
-	VIRT_UART_Transmit(&huart0, (unsigned char *)SlaveAnswString[answ], strlen(SlaveAnswString[answ]));
+    if (VIRT_UART_Transmit(&huart0, (unsigned char *)SlaveAnswString[answ], strlen(SlaveAnswString[answ])) != VIRT_UART_OK ) {
+      log_info("Error VIRT_UART_Transmit uart0 answ: %s\n", SlaveAnswString[answ]);
+    }
     break;
   case MEASURED_LUX_MSG:
     assert(nargs == 2);
@@ -354,12 +352,17 @@ void SendSlaveAnswer(int nargs, ...) {
     char whole_msg[MAX_ANSW_MSG_LEN];
     strcpy (whole_msg, SlaveAnswString[answ]);
     strncpy(strrchr(whole_msg, '_')+1, strlux, 4);
-    VIRT_UART_Transmit(&huart0, (unsigned char *)whole_msg, strlen(whole_msg));
+    if (VIRT_UART_Transmit(&huart0, (unsigned char *)whole_msg, strlen(whole_msg)) != VIRT_UART_OK ) {
+      log_info("Error VIRT_UART_Transmit uart0\n");
+    }
     break;
+  case READY_MSG:        // these are spontaneous notification to be sent on /dev/ttyRPMSG1
   case SENS_STOPPED_MSG:
-  case EMERGENCY_STOP_MSG:   // this is a spontaneous notification to be sent on /dev/ttyRPMSG1
-	VIRT_UART_Transmit(&huart1, (unsigned char *)SlaveAnswString[answ], strlen(SlaveAnswString[answ]));
-	break;
+  case EMERGENCY_STOP_MSG:
+    if (VIRT_UART_Transmit(&huart1, (unsigned char *)SlaveAnswString[answ], strlen(SlaveAnswString[answ])) != VIRT_UART_OK ) {
+      log_info("Error VIRT_UART_Transmit uart1 answ: <%s>, len: <%d>\n", SlaveAnswString[answ], strlen(SlaveAnswString[answ]));
+    }
+    break;
   default:
     break;
   }
@@ -423,7 +426,6 @@ void RunBeltFSM() {
 
           switch (ParseMasterCmd(MasterCmdRx)) {
             case RUN_FWD_BELT_CMD:
-              log_info("RUN_FWD_BELT_CMD");
               RunBeltForward();
               SendSlaveAnswer(1, RUNNING_FWD_MSG);
               // read range to move away the previous piece if present
